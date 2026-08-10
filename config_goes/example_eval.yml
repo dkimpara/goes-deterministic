@@ -8,7 +8,7 @@ save_forecast: "/glade/derecho/scratch/dkimpara/goes_10km_train/mpas/mpas_fixed_
 # [Optional] filename to save eval results filename default: verif.parquet
 # will save to directory save_forecast, or the default value of save_forecast
 save_filename: "verif.parquet"
-overwrite: True
+overwrite: True #overwrites all existing verification files in the save_forecast_dir
 verification_type: "goes-10km"
 
 ############ custom eval configs ############
@@ -16,8 +16,8 @@ goes_zarr_file: "/glade/derecho/scratch/dkimpara/goes-cloud-dataset/goes_10km_20
 climo_file: "/glade/derecho/scratch/dkimpara/goes_10km_train/baselines/climo/data_stats_2025_test.nc"
 time_tol: "7m"
 
-compute_bulk: True
-compute_FSS_types: ["pct", "pct_tropics"] #["raw", "pct", "pct_tropics"]
+compute_bulk_types: ["all", "region_right", "n_hem", "s_hem"]
+compute_FSS_types: ["pct", "pct_tropics", "pct_region_right"] #["raw", "pct", "pct_tropics"]
 
 
 FSS:

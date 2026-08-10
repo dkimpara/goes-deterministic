@@ -113,74 +113,105 @@ def verification_per_timestep(dataset, climo, eval_conf, step_file_tuple):
     step, f = step_file_tuple
     result_dict = {"forecast_step": step}
     
-    pred_da = xr.open_dataset(f)["BT_or_R"] # BT_or_R with t channel lat lon 
-    true_da = dataset[pred_da.t[0].values, "y"]["y"]
-    w_lat = np.cos(np.deg2rad(pred_da.latitude))
+    pred_da_all = xr.open_dataset(f)["BT_or_R"] # BT_or_R with t channel lat lon 
+    true_da_all = dataset[pred_da_all.t[0].values, "y"]["y"]
+    w_lat = np.cos(np.deg2rad(pred_da_all.latitude))
 
-    if eval_conf.get("compute_bulk", True):
+    for region_name in eval_conf.get("compute_bulk_types", ["all"]):
+        if region_name == "region_right": #compute outside of boundary region
+            pred_da = pred_da_all.sel(longitude=slice(-100, 0))
+            true_da = true_da_all.sel(longitude=slice(-100, 0))
+            region_label = f"_{region_name}"
+        elif region_name == "n_hem":
+            pred_da = pred_da_all.sel(latitude=slice(0, 90))
+            true_da = true_da_all.sel(latitude=slice(0, 90))
+            region_label = f"_{region_name}"
+        elif region_name == "s_hem":
+            pred_da = pred_da_all.sel(latitude=slice(-90, 0))
+            true_da = true_da_all.sel(latitude=slice(-90, 0))
+            region_label = f"_{region_name}"
+        else:
+            pred_da = pred_da_all
+            true_da = true_da_all
+            region_label = ""
+
         diff = pred_da - true_da
 
         # mean error
         me = diff.mean(dim=["t", "latitude", "longitude"])
-        result_dict = result_dict | unpack_da_to_dict(me, "ME")
+        result_dict = result_dict | unpack_da_to_dict(me, f"ME{region_label}")
 
         # MAE
         mae = np.abs(diff).mean(dim=["t", "latitude", "longitude"])
-        result_dict = result_dict | unpack_da_to_dict(mae, "MAE")
+        result_dict = result_dict | unpack_da_to_dict(mae, f"MAE{region_label}")
 
         # RMSE (mean then sqrt)
         mse = np.sqrt((diff ** 2).mean(dim=["t", "latitude", "longitude"]))
-        result_dict = result_dict | unpack_da_to_dict(mse, "RMSE")
+        result_dict = result_dict | unpack_da_to_dict(mse, f"RMSE{region_label}")
 
         # 2D FFT
         fft_pred = radial_fft_spectrum(pred_da, 10.0)
-        result_dict = result_dict | unpack_da_to_dict(fft_pred, "FFT")
+        result_dict = result_dict | unpack_da_to_dict(fft_pred, f"FFT{region_label}")
         fft_true = radial_fft_spectrum(true_da, 10.0)
-        result_dict = result_dict | unpack_da_to_dict(fft_true, "FFT_true")
+        result_dict = result_dict | unpack_da_to_dict(fft_true, f"FFT_true{region_label}")
 
         # MAESS compared to climo
         # S = (x - x_r) / (x_p - x_r)
         mae_climo = np.abs(climo - true_da).mean(dim=["latitude", "longitude"])
         maess = (mae - mae_climo) / (-1 * mae_climo)
-        result_dict = result_dict | unpack_da_to_dict(maess, "MAESS")
+        result_dict = result_dict | unpack_da_to_dict(maess, f"MAESS{region_label}")
     
     # confusion matrix
-    pred_da_all = pred_da.isel(t=0)
-    target_da_all = true_da
+    pred_da_all = pred_da_all.isel(t=0)
+    target_da_all = true_da_all
     for channel, fss_conf in eval_conf["FSS"].items():
-        pred_da = pred_da_all.sel(channel=channel)
-        target_da = target_da_all.sel(channel=channel) 
+        pred_ch = pred_da_all.sel(channel=channel)
+        target_ch = target_da_all.sel(channel=channel)
         if "pct" in eval_conf.get("compute_FSS_types", ["pct", "pct_tropics"]):
-            result_dict = result_dict | confusion_matrix_percentile_categories(pred_da, target_da, fss_conf, channel)
+            result_dict = result_dict | confusion_matrix_percentile_categories(pred_ch, target_ch, fss_conf, channel)
 
         if "pct_tropics" in eval_conf.get("compute_FSS_types", ["pct", "pct_tropics"]):
-            # percentile FSS tropics
-            lat_bounds = [-21, 21]
-            target_da = target_da.sel(latitude = slice(*lat_bounds))
-            pred_da = pred_da.sel(latitude = slice(*lat_bounds))
-            
-            tropics_results = confusion_matrix_percentile_categories(pred_da, target_da, fss_conf, channel)
+            lat_bounds = [-24, 24]
+            tropics_results = confusion_matrix_percentile_categories(
+                pred_ch.sel(latitude=slice(*lat_bounds)),
+                target_ch.sel(latitude=slice(*lat_bounds)),
+                fss_conf, channel)
             tropics_results = {f"{k}_tropics": v for k,v in tropics_results.items()}
             result_dict = result_dict | tropics_results
+        if "pct_region_right" in eval_conf.get("compute_FSS_types", ["raw", "pct", "pct_tropics"]):
+            lon_bounds = [-100, 0]
+            slice_results = confusion_matrix_percentile_categories(
+                pred_ch.sel(longitude=slice(*lon_bounds)),
+                target_ch.sel(longitude=slice(*lon_bounds)),
+                fss_conf, channel)
+            slice_results = {f"{k}_region_right": v for k,v in slice_results.items()}
+            result_dict = result_dict | slice_results
     # FSS
-    # for channel, fss_conf in eval_conf["FSS"].items():
-    #     pred_da = pred_da_all.sel(channel=channel)
-    #     target_da = target_da_all.sel(channel=channel) 
-        
-    #     if "raw" in eval_conf.get("compute_FSS_types", ["raw", "pct", "pct_tropics"]):
-    #         result_dict = result_dict | FSS_raw_threshold(pred_da, target_da, eval_conf, fss_conf, channel)
-    #     if "pct" in eval_conf.get("compute_FSS_types", ["raw", "pct", "pct_tropics"]):
-    #         result_dict = result_dict | FSS_percentile_threshold(pred_da, target_da, eval_conf, fss_conf, channel)
+    for channel, fss_conf in eval_conf["FSS"].items():
+        pred_ch = pred_da_all.sel(channel=channel)
+        target_ch = target_da_all.sel(channel=channel)
 
-    #     if "pct_tropics" in eval_conf.get("compute_FSS_types", ["raw", "pct", "pct_tropics"]):
-    #         # percentile FSS tropics
-    #         lat_bounds = [-21, 21]
-    #         target_da = target_da.sel(latitude = slice(*lat_bounds))
-    #         pred_da = pred_da.sel(latitude = slice(*lat_bounds))
-            
-    #         tropics_results = FSS_percentile_threshold(pred_da, target_da, eval_conf, fss_conf, channel)
-    #         tropics_results = {f"{k}_tropics": v for k,v in tropics_results.items()}
-    #         result_dict = result_dict | tropics_results
+        if "raw" in eval_conf.get("compute_FSS_types", ["raw", "pct", "pct_tropics"]):
+            result_dict = result_dict | FSS_raw_threshold(pred_ch, target_ch, eval_conf, fss_conf, channel)
+        if "pct" in eval_conf.get("compute_FSS_types", ["raw", "pct", "pct_tropics"]):
+            result_dict = result_dict | FSS_percentile_threshold(pred_ch, target_ch, eval_conf, fss_conf, channel)
+
+        if "pct_tropics" in eval_conf.get("compute_FSS_types", ["raw", "pct", "pct_tropics"]):
+            lat_bounds = [-24, 24]
+            tropics_results = FSS_percentile_threshold(
+                pred_ch.sel(latitude=slice(*lat_bounds)),
+                target_ch.sel(latitude=slice(*lat_bounds)),
+                eval_conf, fss_conf, channel)
+            tropics_results = {f"{k}_tropics": v for k,v in tropics_results.items()}
+            result_dict = result_dict | tropics_results
+        if "pct_region_right" in eval_conf.get("compute_FSS_types", ["raw", "pct", "pct_tropics"]):
+            lon_bounds = [-100, 0]
+            slice_results = FSS_percentile_threshold(
+                pred_ch.sel(longitude=slice(*lon_bounds)),
+                target_ch.sel(longitude=slice(*lon_bounds)),
+                eval_conf, fss_conf, channel)
+            slice_results = {f"{k}_region_right": v for k,v in slice_results.items()}
+            result_dict = result_dict | slice_results
 
     return result_dict
 

@@ -72,6 +72,7 @@ def get_rollout_init_times(conf):
                             "2022-12-02T11:55:06", 
                             "2022-12-15T23:55:05", #SA convective case
                             "2022-12-16T11:55:06", #SA convective case
+                            "2022-12-16T17:55:06", #SA convective case
                          ]
         rollout_init_times = ([pd.Timestamp("2022-07-01") + pd.Timedelta("30m")] # check 30min offset case
                               + [pd.Timestamp(time) for time in init_times_str])
@@ -430,10 +431,19 @@ def predict(rank, world_size, conf, p):
                     x = torch.clamp(x, min=clamp_min, max=clamp_max)
 
                 if "era5" in batch.keys():
-                    x_era5 = torch.concat([batch_era5["prognostic"].to(device),
-                                           era5_static.detach().clone(),
-                                           batch_era5["dynamic_forcing"].to(device)],
-                                           dim=1).float()
+                    if batch_era5["prognostic"].shape[1] == 0: # DOP only
+                        x_era5 = torch.concat([batch_era5["dynamic_forcing"].to(device),
+                                                era5_static.detach().clone(),
+                                                ],dim=1).float()
+                        # era5_static = era5_static.detach().clone()
+                        # if ensemble_size > 1:
+                        #     era5_static = torch.repeat_interleave(era5_static, ensemble_size, 0)
+                        # x = torch.cat([x, era5_static], dim=1)
+                    else:
+                        x_era5 = torch.concat([batch_era5["prognostic"].to(device),
+                                            era5_static.detach().clone(),
+                                            batch_era5["dynamic_forcing"].to(device)],
+                                            dim=1).float()
                     forcing_t_delta = batch_era5["timedelta_seconds"].to(device).float()
 
                     if ensemble_size > 1:
