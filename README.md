@@ -56,4 +56,4 @@ This research was supported by the United States Air Force (grant no. NA21OAR431
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+Apache 2.0. See [LICENSE](LICENSE).
